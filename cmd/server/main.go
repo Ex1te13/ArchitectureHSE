@@ -7,12 +7,15 @@ import (
 	"os"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shopspring/decimal"
 
 	"marketplace/internal/api"
 	"marketplace/internal/handler"
+	"marketplace/internal/repository"
 )
 
 func main() {
+	decimal.MarshalJSONWithoutQuotes = true
 	ctx := context.Background()
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
@@ -26,10 +29,10 @@ func main() {
 	if err := pool.Ping(ctx); err != nil {
 		log.Fatal("cannot connect to database: ", err)
 	}
-	h := &handler.ProductHandler{}
+	repo := repository.NewProductRepository(pool)
+	h := handler.NewProductHandler(repo)
 	strict := api.NewStrictHandler(h, nil)
 	router := api.HandlerFromMux(strict, http.NewServeMux())
-	_ = pool
 	log.Println("listening on :8080")
 	log.Fatal(http.ListenAndServe(":8080", router))
 }
