@@ -21,6 +21,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProductResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
     get:
       operationId: getProducts
       summary: Список товаров с пагинацией и фильтрацией
@@ -55,6 +57,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProductPage'
+        '400':
+          $ref: '#/components/responses/ValidationError'
   /products/{id}:
     parameters:
       - name: id
@@ -73,6 +77,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProductResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
     put:
       operationId: updateProduct
@@ -90,18 +98,42 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProductResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
     delete:
       operationId: deleteProduct
       summary: Мягкое удаление (перевод в статус ARCHIVED)
       responses:
         '204':
           description: Товар удален
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
 components:
   schemas:
     ProductStatus:
       type: string
       enum: [ACTIVE, INACTIVE, ARCHIVED]
+    ErrorCode:
+      type: string
+      enum: [PRODUCT_NOT_FOUND, PRODUCT_INACTIVE, ORDER_NOT_FOUND, ORDER_LIMIT_EXCEEDED, 
+             ORDER_HAS_ACTIVE, INVALID_STATE_TRANSITION, INSUFFICIENT_STOCK, PROMO_CODE_INVALID, 
+             PROMO_CODE_MIN_AMOUNT, ORDER_OWNERSHIP_VIOLATION, VALIDATION_ERROR]
+    Error:
+      type: object
+      required: [error_code, message]
+      properties:
+        error_code: 
+          $ref: '#/components/schemas/ErrorCode'
+        message:
+          type: string
+        details: 
+          type: object
+          additionalProperties: true
     ProductCreate:
       type: object
       required: [name, price, stock, category, status]
@@ -162,4 +194,18 @@ components:
           type: integer
         size:
           type: integer
+  responses:
+    NotFound:
+      description: Ресурс не найден
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ValidationError:
+      description: Ошибка валидации входных данных
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
 
