@@ -1,14 +1,14 @@
 services:
-  postgres:                                  
-    image: postgres:17                    
-    environment:                          
+  postgres:
+    image: postgres:17
+    environment:
       POSTGRES_USER: admin
-      POSTGRES_PASSWORD: 6767     
-      POSTGRES_DB: marketplace       
+      POSTGRES_PASSWORD: 6767
+      POSTGRES_DB: marketplace
     ports:
-      - "5432:5432"                     
+      - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data 
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "admin", "-d", "marketplace"]
       interval: 5s
@@ -41,4 +41,4 @@ services:
       - "8080:8080"
 
 volumes:
-  pgdata:                          
+  pgdata:

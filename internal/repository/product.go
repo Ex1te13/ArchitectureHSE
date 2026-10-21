@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -34,8 +33,6 @@ type ProductFilter struct {
 	Offset   int
 }
 
-const productColumns = `id, name, description, price, stock, category, status, created_at, updated_at`
-
 type ProductRepository struct {
 	pool *pgxpool.Pool
 }
@@ -44,11 +41,9 @@ func NewProductRepository(pool *pgxpool.Pool) *ProductRepository {
 	return &ProductRepository{pool: pool}
 }
 
-type rowScanner interface {
-	Scan(dest ...any) error
-}
+const productColumns = `id, name, description, price, stock, category, status, created_at, updated_at`
 
-func scanProduct(row rowScanner) (Product, error) {
+func scanProduct(row pgx.Row) (Product, error) {
 	var p Product
 	err := row.Scan(&p.ID, &p.Name, &p.Description, &p.Price, &p.Stock,
 		&p.Category, &p.Status, &p.CreatedAt, &p.UpdatedAt)
@@ -56,17 +51,16 @@ func scanProduct(row rowScanner) (Product, error) {
 }
 
 func (r *ProductRepository) Create(ctx context.Context, p Product) (Product, error) {
-	const q = `
+	q := `
 		INSERT INTO products (name, description, price, stock, category, status)
 		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id, created_at, updated_at`
-	err := r.pool.QueryRow(ctx, q,
-		p.Name, p.Description, p.Price, p.Stock, p.Category, p.Status,
-	).Scan(&p.ID, &p.CreatedAt, &p.UpdatedAt)
+		RETURNING ` + productColumns
+	created, err := scanProduct(r.pool.QueryRow(ctx, q,
+		p.Name, p.Description, p.Price, p.Stock, p.Category, p.Status))
 	if err != nil {
 		return Product{}, fmt.Errorf("insert product: %w", err)
 	}
-	return p, nil
+	return created, nil
 }
 
 func (r *ProductRepository) GetByID(ctx context.Context, id uuid.UUID) (Product, error) {
@@ -74,7 +68,8 @@ func (r *ProductRepository) GetByID(ctx context.Context, id uuid.UUID) (Product,
 	p, err := scanProduct(r.pool.QueryRow(ctx, q, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Product{}, ErrNotFound
-	} else if err != nil {
+	}
+	if err != nil {
 		return Product{}, fmt.Errorf("select product: %w", err)
 	}
 	return p, nil
@@ -87,11 +82,11 @@ func (r *ProductRepository) Update(ctx context.Context, p Product) (Product, err
 		WHERE id = $1
 		RETURNING ` + productColumns
 	updated, err := scanProduct(r.pool.QueryRow(ctx, q,
-		p.ID, p.Name, p.Description, p.Price, p.Stock, p.Category, p.Status,
-	))
+		p.ID, p.Name, p.Description, p.Price, p.Stock, p.Category, p.Status))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Product{}, ErrNotFound
-	} else if err != nil {
+	}
+	if err != nil {
 		return Product{}, fmt.Errorf("update product: %w", err)
 	}
 	return updated, nil
@@ -108,28 +103,22 @@ func (r *ProductRepository) Archive(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+const listFilter = `
+	WHERE ($1::product_status IS NULL OR status = $1)
+	  AND ($1::product_status IS NOT NULL OR status <> 'ARCHIVED')
+	  AND ($2::text IS NULL OR category = $2)`
+
 func (r *ProductRepository) List(ctx context.Context, f ProductFilter) ([]Product, int, error) {
-	var conds []string
-	var args []any
-	if f.Status != nil {
-		args = append(args, *f.Status)
-		conds = append(conds, fmt.Sprintf("status = $%d", len(args)))
-	} else {
-		conds = append(conds, "status <> 'ARCHIVED'")
-	}
-	if f.Category != nil {
-		args = append(args, *f.Category)
-		conds = append(conds, fmt.Sprintf("category = $%d", len(args)))
-	}
-	where := " WHERE " + strings.Join(conds, " AND ")
 	var total int
-	if err := r.pool.QueryRow(ctx, `SELECT count(*) FROM products`+where, args...).Scan(&total); err != nil {
+	err := r.pool.QueryRow(ctx, `SELECT count(*) FROM products`+listFilter,
+		f.Status, f.Category).Scan(&total)
+	if err != nil {
 		return nil, 0, fmt.Errorf("count products: %w", err)
 	}
-	args = append(args, f.Limit, f.Offset)
-	q := `SELECT ` + productColumns + ` FROM products` + where +
-		fmt.Sprintf(` ORDER BY created_at DESC, id LIMIT $%d OFFSET $%d`, len(args)-1, len(args))
-	rows, err := r.pool.Query(ctx, q, args...)
+	q := `SELECT ` + productColumns + ` FROM products` + listFilter + `
+		ORDER BY created_at DESC, id
+		LIMIT $3 OFFSET $4`
+	rows, err := r.pool.Query(ctx, q, f.Status, f.Category, f.Limit, f.Offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list products: %w", err)
 	}
@@ -142,8 +131,5 @@ func (r *ProductRepository) List(ctx context.Context, f ProductFilter) ([]Produc
 		}
 		products = append(products, p)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("list products: %w", err)
-	}
-	return products, total, nil
+	return products, total, rows.Err()
 }

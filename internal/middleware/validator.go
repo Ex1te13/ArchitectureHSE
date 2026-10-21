@@ -16,7 +16,7 @@ func init() {
 		`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 }
 
-func OpenAPIValidator(doc *openapi3.T) (func(http.Handler) http.Handler, error) {
+func Validator(doc *openapi3.T) (func(http.Handler) http.Handler, error) {
 	doc.Servers = nil
 	router, err := legacy.NewRouter(doc)
 	if err != nil {
@@ -29,14 +29,14 @@ func OpenAPIValidator(doc *openapi3.T) (func(http.Handler) http.Handler, error) 
 				next.ServeHTTP(w, r)
 				return
 			}
-			input := &openapi3filter.RequestValidationInput{
+			err = openapi3filter.ValidateRequest(r.Context(), &openapi3filter.RequestValidationInput{
 				Request:    r,
 				PathParams: pathParams,
 				Route:      route,
 				Options:    &openapi3filter.Options{MultiError: true},
-			}
-			if err := openapi3filter.ValidateRequest(r.Context(), input); err != nil {
-				writeValidationError(w, fieldErrors(err))
+			})
+			if err != nil {
+				writeValidationError(w, toFieldErrors(err))
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -44,56 +44,47 @@ func OpenAPIValidator(doc *openapi3.T) (func(http.Handler) http.Handler, error) 
 	}, nil
 }
 
-func fieldErrors(err error) []FieldError {
-	var result []FieldError
-	for _, e := range unwrapMulti(err) {
-		var reqErr *openapi3filter.RequestError
-		if !errors.As(e, &reqErr) {
-			result = append(result, FieldError{Message: e.Error()})
-			continue
-		}
-		param := ""
-		if reqErr.Parameter != nil {
-			param = reqErr.Parameter.Name
-		}
-		inner := unwrapMulti(reqErr.Err)
-		if len(inner) == 0 {
-			result = append(result, FieldError{Field: fieldOrBody(param), Message: reqErr.Reason})
-			continue
-		}
-		for _, ie := range inner {
-			var schemaErr *openapi3.SchemaError
-			if errors.As(ie, &schemaErr) {
-				field := strings.Join(schemaErr.JSONPointer(), ".")
-				if param != "" {
-					field = param
-				}
-				result = append(result, FieldError{Field: fieldOrBody(field), Message: schemaErr.Reason})
-				continue
-			}
-			result = append(result, FieldError{Field: fieldOrBody(param), Message: ie.Error()})
-		}
+func toFieldErrors(err error) []FieldError {
+	var fields []FieldError
+	for _, e := range splitErrors(err) {
+		fields = append(fields, toFieldError(e))
 	}
-	return result
+	return fields
 }
 
-func unwrapMulti(err error) []error {
-	if err == nil {
-		return nil
-	}
+func splitErrors(err error) []error {
 	if multi, ok := err.(openapi3.MultiError); ok {
 		var all []error
 		for _, e := range multi {
-			all = append(all, unwrapMulti(e)...)
+			all = append(all, splitErrors(e)...)
 		}
 		return all
+	}
+	var reqErr *openapi3filter.RequestError
+	if errors.As(err, &reqErr) {
+		if multi, ok := reqErr.Err.(openapi3.MultiError); ok {
+			var all []error
+			for _, e := range multi {
+				all = append(all, splitErrors(&openapi3filter.RequestError{Parameter: reqErr.Parameter, Err: e})...)
+			}
+			return all
+		}
 	}
 	return []error{err}
 }
 
-func fieldOrBody(field string) string {
-	if field == "" {
-		return "body"
+func toFieldError(err error) FieldError {
+	field, message := "body", err.Error()
+	var reqErr *openapi3filter.RequestError
+	if errors.As(err, &reqErr) && reqErr.Parameter != nil {
+		field = reqErr.Parameter.Name
 	}
-	return field
+	var schemaErr *openapi3.SchemaError
+	if errors.As(err, &schemaErr) {
+		message = schemaErr.Reason
+		if path := schemaErr.JSONPointer(); field == "body" && len(path) > 0 {
+			field = strings.Join(path, ".")
+		}
+	}
+	return FieldError{Field: field, Message: message}
 }

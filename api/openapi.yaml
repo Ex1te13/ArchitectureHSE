@@ -213,7 +213,7 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     ValidationError:
-      description: Ошибка валидации входных данны
+      description: Ошибка валидации входных данных
       content:
         application/json:
           schema:

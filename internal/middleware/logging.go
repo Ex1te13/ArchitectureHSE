@@ -13,8 +13,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const maskedValue = "***"
-
 var sensitiveKeys = map[string]bool{
 	"password":      true,
 	"access_token":  true,
@@ -58,19 +56,9 @@ func Logging(next http.Handler) http.Handler {
 		info := &requestInfo{id: uuid.NewString()}
 		r = r.WithContext(context.WithValue(r.Context(), requestInfoKey{}, info))
 		w.Header().Set("X-Request-Id", info.id)
-
-		var body any
-		if isMutating(r.Method) && r.Body != nil {
-			raw, err := io.ReadAll(r.Body)
-			if err == nil {
-				r.Body = io.NopCloser(bytes.NewReader(raw))
-				body = maskBody(raw)
-			}
-		}
-
+		body := readBody(r)
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
-
 		attrs := []any{
 			slog.String("request_id", info.id),
 			slog.String("method", r.Method),
@@ -86,39 +74,38 @@ func Logging(next http.Handler) http.Handler {
 	})
 }
 
-func isMutating(method string) bool {
-	return method == http.MethodPost || method == http.MethodPut ||
-		method == http.MethodPatch || method == http.MethodDelete
-}
-
-func maskBody(raw []byte) any {
+func readBody(r *http.Request) any {
+	switch r.Method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+	default:
+		return nil
+	}
+	raw, _ := io.ReadAll(r.Body)
+	r.Body = io.NopCloser(bytes.NewReader(raw))
 	if len(raw) == 0 {
 		return nil
 	}
-	var parsed any
-	if err := json.Unmarshal(raw, &parsed); err != nil {
+	var body any
+	if err := json.Unmarshal(raw, &body); err != nil {
 		return "<invalid json>"
 	}
-	return mask(parsed)
+	mask(body)
+	return body
 }
 
-func mask(v any) any {
+func mask(v any) {
 	switch val := v.(type) {
 	case map[string]any:
-		for k, inner := range val {
-			if sensitiveKeys[strings.ToLower(k)] {
-				val[k] = maskedValue
+		for key, inner := range val {
+			if sensitiveKeys[strings.ToLower(key)] {
+				val[key] = "***"
 			} else {
-				val[k] = mask(inner)
+				mask(inner)
 			}
 		}
-		return val
 	case []any:
-		for i, inner := range val {
-			val[i] = mask(inner)
+		for _, item := range val {
+			mask(item)
 		}
-		return val
-	default:
-		return v
 	}
 }
