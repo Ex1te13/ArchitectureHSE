@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 
@@ -16,6 +17,14 @@ import (
 )
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if a.Key == slog.TimeKey && len(groups) == 0 {
+				a.Key = "timestamp"
+			}
+			return a
+		},
+	})))
 	decimal.MarshalJSONWithoutQuotes = true
 	ctx := context.Background()
 	dbURL := os.Getenv("DATABASE_URL")
@@ -48,6 +57,6 @@ func main() {
 	if err != nil {
 		log.Fatal("cannot create validator: ", err)
 	}
-	log.Println("listening on :8080")
-	log.Fatal(http.ListenAndServe(":8080", validate(router)))
+	slog.Info("server started", slog.String("addr", ":8080"))
+	log.Fatal(http.ListenAndServe(":8080", middleware.Logging(validate(router))))
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"log/slog"
 	"net/http"
 
 	"marketplace/internal/api"
@@ -45,6 +46,11 @@ func RequestErrorHandler(w http.ResponseWriter, r *http.Request, err error) {
 }
 
 func ResponseErrorHandler(w http.ResponseWriter, r *http.Request, err error) {
-	log.Printf("internal error: %s %s: %v", r.Method, r.URL.Path, err)
+	slog.Error("internal error",
+		slog.String("request_id", RequestID(r.Context())),
+		slog.String("method", r.Method),
+		slog.String("endpoint", r.URL.Path),
+		slog.String("error", err.Error()),
+	)
 	WriteError(w, http.StatusInternalServerError, api.INTERNALERROR, "internal server error", nil)
 }
