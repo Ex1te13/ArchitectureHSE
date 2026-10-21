@@ -1,0 +1,4 @@
+.git
+*.gen.go
+docker-compose.yml
+Dockerfile

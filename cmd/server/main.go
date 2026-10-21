@@ -11,6 +11,7 @@ import (
 
 	"marketplace/internal/api"
 	"marketplace/internal/handler"
+	"marketplace/internal/middleware"
 	"marketplace/internal/repository"
 )
 
@@ -31,8 +32,22 @@ func main() {
 	}
 	repo := repository.NewProductRepository(pool)
 	h := handler.NewProductHandler(repo)
-	strict := api.NewStrictHandler(h, nil)
-	router := api.HandlerFromMux(strict, http.NewServeMux())
+	strict := api.NewStrictHandlerWithOptions(h, nil, api.StrictHTTPServerOptions{
+		RequestErrorHandlerFunc:  middleware.RequestErrorHandler,
+		ResponseErrorHandlerFunc: middleware.ResponseErrorHandler,
+	})
+	router := api.HandlerWithOptions(strict, api.StdHTTPServerOptions{
+		BaseRouter:       http.NewServeMux(),
+		ErrorHandlerFunc: middleware.ParamErrorHandler,
+	})
+	spec, err := api.GetSwagger()
+	if err != nil {
+		log.Fatal("cannot load openapi spec: ", err)
+	}
+	validate, err := middleware.OpenAPIValidator(spec)
+	if err != nil {
+		log.Fatal("cannot create validator: ", err)
+	}
 	log.Println("listening on :8080")
-	log.Fatal(http.ListenAndServe(":8080", router))
+	log.Fatal(http.ListenAndServe(":8080", validate(router)))
 }

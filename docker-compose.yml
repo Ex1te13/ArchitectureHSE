@@ -28,5 +28,17 @@ services:
       - ./migrations:/flyway/sql
     command: migrate
 
+  app:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+      flyway:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgres://admin:6767@postgres:5432/marketplace
+    ports:
+      - "8080:8080"
+
 volumes:
   pgdata:                          

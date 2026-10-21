@@ -23,6 +23,8 @@ paths:
                 $ref: '#/components/schemas/ProductResponse'
         '400':
           $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
     get:
       operationId: getProducts
       summary: Список товаров с пагинацией и фильтрацией
@@ -59,6 +61,8 @@ paths:
                 $ref: '#/components/schemas/ProductPage'
         '400':
           $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /products/{id}:
     parameters:
       - name: id
@@ -81,6 +85,8 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '404':
           $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
     put:
       operationId: updateProduct
@@ -102,6 +108,8 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '404':
           $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
     delete:
       operationId: deleteProduct
       summary: Мягкое удаление (перевод в статус ARCHIVED)
@@ -112,6 +120,8 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '404':
           $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
 components:
   schemas:
@@ -122,7 +132,8 @@ components:
       type: string
       enum: [PRODUCT_NOT_FOUND, PRODUCT_INACTIVE, ORDER_NOT_FOUND, ORDER_LIMIT_EXCEEDED, 
              ORDER_HAS_ACTIVE, INVALID_STATE_TRANSITION, INSUFFICIENT_STOCK, PROMO_CODE_INVALID, 
-             PROMO_CODE_MIN_AMOUNT, ORDER_OWNERSHIP_VIOLATION, VALIDATION_ERROR]
+             PROMO_CODE_MIN_AMOUNT, ORDER_OWNERSHIP_VIOLATION, VALIDATION_ERROR,
+             INTERNAL_ERROR]
     Error:
       type: object
       required: [error_code, message]
@@ -202,7 +213,13 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     ValidationError:
-      description: Ошибка валидации входных данных
+      description: Ошибка валидации входных данны
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalError:
+      description: Внутренняя ошибка сервера
       content:
         application/json:
           schema:
