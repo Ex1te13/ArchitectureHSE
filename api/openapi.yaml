@@ -1,0 +1,165 @@
+openapi: 3.0.3
+info:
+  title: Marketplace API
+  version: 1.0.0
+
+paths:
+  /products:
+    post:
+      operationId: createProduct
+      summary: Создание товара
+      requestBody:          
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductCreate'
+      responses:
+        '201':
+          description: Товар создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+    get:
+      operationId: getProducts
+      summary: Список товаров с пагинацией и фильтрацией
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 20
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/ProductStatus'
+        - name: category
+          in: query
+          schema:
+            type: string
+            maxLength: 100
+      responses:
+        '200':
+          description: Получен список товаров
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductPage'
+  /products/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getProduct
+      summary: Получение товара по ID
+      responses:
+        '200':
+          description: Товар получен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+
+    put:
+      operationId: updateProduct
+      summary: Обновление товара
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductUpdate'
+      responses:
+        '200':
+          description: Товар обновлен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductResponse'
+    delete:
+      operationId: deleteProduct
+      summary: Мягкое удаление (перевод в статус ARCHIVED)
+      responses:
+        '204':
+          description: Товар удален
+
+components:
+  schemas:
+    ProductStatus:
+      type: string
+      enum: [ACTIVE, INACTIVE, ARCHIVED]
+    ProductCreate:
+      type: object
+      required: [name, price, stock, category, status]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+          maxLength: 4000
+          nullable: true
+        price:
+          type: number
+          format: decimal
+          minimum: 0.01
+          x-go-type: decimal.Decimal
+          x-go-type-import:
+            path: github.com/shopspring/decimal
+        stock:
+          type: integer
+          minimum: 0
+        category:
+          type: string
+          minLength: 1
+          maxLength: 100
+        status:
+          $ref: '#/components/schemas/ProductStatus'
+    ProductResponse:
+      allOf:
+      - $ref: '#/components/schemas/ProductCreate'  
+      - type: object                             
+        required: [id, created_at, updated_at]
+        properties:
+          id:
+            type: string
+            format: uuid
+          created_at:
+            type: string
+            format: date-time
+          updated_at:
+            type: string
+            format: date-time
+    ProductUpdate:
+      allOf: 
+      - $ref: '#/components/schemas/ProductCreate'
+    ProductPage:
+      type: object
+      required: [products, totalElements, page, size]
+      properties:
+        products: 
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductResponse'
+        totalElements:
+          type: integer
+        page:
+          type: integer
+        size:
+          type: integer
+
