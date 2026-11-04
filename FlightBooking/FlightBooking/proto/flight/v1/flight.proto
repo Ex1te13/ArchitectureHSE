@@ -1,0 +1,148 @@
+syntax = "proto3";
+
+package flight.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "flightbooking/gen/flight/v1;flightv1";
+
+// FlightService управляет рейсами и резервированием мест на них
+//   UNAUTHENTICATED
+//   INTERNAL
+//   UNAVAILABLE
+service FlightService {
+  // Ищет рейсы в статусе SCHEDULED по маршруту
+  //   INVALID_ARGUMENT — origin или destination не IATA-код (3 заглавные
+  //                      латинские буквы) либо origin == destination.
+  rpc SearchFlights(SearchFlightsRequest) returns (SearchFlightsResponse);
+
+  // Возвращает рейс по ID
+  //   INVALID_ARGUMENT — flight_id не является UUID
+  //   NOT_FOUND        — рейса с таким ID нет
+  rpc GetFlight(GetFlightRequest) returns (GetFlightResponse);
+
+  // Атомарно проверяет наличие свободных мест, уменьшает available_seats
+  // и создаёт резервацию в статусе ACTIVE для бронирования booking_id
+  //   INVALID_ARGUMENT    — flight_id или booking_id не UUID, seat_count <= 0
+  //   NOT_FOUND           — рейса с таким ID нет
+  //   FAILED_PRECONDITION — рейс не в статусе SCHEDULED
+  //   RESOURCE_EXHAUSTED  — свободных мест меньше, чем seat_count
+  //   ALREADY_EXISTS      — для booking_id уже есть резервация с другим рейсом или количеством мест
+  rpc ReserveSeats(ReserveSeatsRequest) returns (ReserveSeatsResponse);
+
+  // Отменяет резервацию бронирования booking_id: возвращает места рейсу и переводит резервацию в статус RELEASED
+  //   INVALID_ARGUMENT    — booking_id не UUID
+  //   NOT_FOUND           — резервации для booking_id нет
+  //   FAILED_PRECONDITION — резервация в статусе EXPIRED
+  rpc ReleaseReservation(ReleaseReservationRequest) returns (ReleaseReservationResponse);
+
+  // Изменяет переданные поля рейса
+  //   INVALID_ARGUMENT — flight_id не UUID, цена <= 0,
+  //                      arrival_time не позже departure_time,
+  //                      status == FLIGHT_STATUS_UNSPECIFIED
+  //   NOT_FOUND        — рейса с таким ID нет
+  rpc UpdateFlight(UpdateFlightRequest) returns (UpdateFlightResponse);
+}
+
+// Статус рейса
+enum FlightStatus {
+  FLIGHT_STATUS_UNSPECIFIED = 0;
+  FLIGHT_STATUS_SCHEDULED = 1;
+  FLIGHT_STATUS_DEPARTED = 2;
+  FLIGHT_STATUS_CANCELLED = 3;
+  FLIGHT_STATUS_COMPLETED = 4;
+}
+
+// Статус резервации мест
+enum ReservationStatus {
+  RESERVATION_STATUS_UNSPECIFIED = 0;
+  RESERVATION_STATUS_ACTIVE = 1;
+  RESERVATION_STATUS_RELEASED = 2;
+  RESERVATION_STATUS_EXPIRED = 3;
+}
+
+// Денежная сумма
+message Money {
+  int64 amount = 1;
+  string currency = 2;
+}
+
+// Рейс
+message Flight {
+  string id = 1;
+  string flight_number = 2;
+  string airline_code = 3;
+  string airline_name = 4;
+  string origin = 5;
+  string destination = 6;
+  google.protobuf.Timestamp departure_time = 7;
+  google.protobuf.Timestamp arrival_time = 8;
+  int32 total_seats = 9;
+  int32 available_seats = 10;
+  Money price = 11;
+  FlightStatus status = 12;
+}
+
+// Резервация мест на рейсе под одно бронирование из Booking Service
+message Reservation {
+  string id = 1;
+  string booking_id = 2;
+  string flight_id = 3;
+  int32 seat_count = 4;
+  ReservationStatus status = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+
+message SearchFlightsRequest {
+  string origin = 1;
+  string destination = 2;
+  google.protobuf.Timestamp date = 3;
+}
+
+message SearchFlightsResponse {
+  repeated Flight flights = 1;
+}
+
+
+message GetFlightRequest {
+  string flight_id = 1;
+}
+
+message GetFlightResponse {
+  Flight flight = 1;
+}
+
+
+message ReserveSeatsRequest {
+  string flight_id = 1;
+  string booking_id = 2;
+  int32 seat_count = 3;
+}
+
+message ReserveSeatsResponse {
+  Reservation reservation = 1;
+}
+
+
+message ReleaseReservationRequest {
+  string booking_id = 1;
+}
+
+message ReleaseReservationResponse {
+  Reservation reservation = 1;
+}
+
+
+message UpdateFlightRequest {
+  string flight_id = 1;
+  optional FlightStatus status = 2;
+  Money price = 3;
+  google.protobuf.Timestamp departure_time = 4;
+  google.protobuf.Timestamp arrival_time = 5;
+}
+
+message UpdateFlightResponse {
+  Flight flight = 1;
+}
