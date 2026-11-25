@@ -1,0 +1,190 @@
+{
+  "uid": "online-cinema",
+  "title": "Аналитика онлайн-кинотеатра",
+  "schemaVersion": 41,
+  "timezone": "utc",
+  "refresh": "1m",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Retention по дате первого просмотра",
+      "type": "table",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 9
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "cinema-ch"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "cinema-ch"
+          },
+          "editorType": "sql",
+          "rawSql": "SELECT toString(cohort) AS `Когорта`,\n  maxOrNullIf(value, age = 0) AS `Day 0`,\n  maxOrNullIf(value, age = 1) AS `Day 1`,\n  maxOrNullIf(value, age = 2) AS `Day 2`,\n  maxOrNullIf(value, age = 3) AS `Day 3`,\n  maxOrNullIf(value, age = 4) AS `Day 4`,\n  maxOrNullIf(value, age = 5) AS `Day 5`,\n  maxOrNullIf(value, age = 6) AS `Day 6`,\n  maxOrNullIf(value, age = 7) AS `Day 7`\nFROM (\n  SELECT value, toInt32OrZero(right(metric, 1)) AS age, subtractDays(day, age) AS cohort\n  FROM cinema.daily_metrics\n  WHERE startsWith(metric, 'cohort_day_')\n)\nWHERE $__dateFilter(cohort)\nGROUP BY cohort ORDER BY cohort DESC",
+          "format": 1,
+          "queryType": "table"
+        }
+      ],
+      "options": {
+        "showHeader": true
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/^Day [0-7]$/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 1
+              },
+              {
+                "id": "noValue",
+                "value": "—"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "value": null,
+                      "color": "#eef5fb"
+                    },
+                    {
+                      "value": 0.25,
+                      "color": "#c0d9ed"
+                    },
+                    {
+                      "value": 0.5,
+                      "color": "#85b5d6"
+                    },
+                    {
+                      "value": 0.75,
+                      "color": "#468bb9"
+                    },
+                    {
+                      "value": 1,
+                      "color": "#195b8c"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "title": "Активные пользователи",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "cinema-ch"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "cinema-ch"
+          },
+          "editorType": "sql",
+          "rawSql": "SELECT toDateTime(day, 'UTC') AS time, value AS `Активные пользователи` FROM cinema.daily_metrics WHERE metric = 'dau' AND $__dateFilter(day) ORDER BY time",
+          "format": 0,
+          "queryType": "timeseries"
+        }
+      ],
+      "options": {},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "showPoints": "always"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "title": "Конверсия просмотра",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 9,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "cinema-ch"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "cinema-ch"
+          },
+          "editorType": "sql",
+          "rawSql": "SELECT toDateTime(day, 'UTC') AS time, value AS `Конверсия просмотра` FROM cinema.daily_metrics WHERE metric = 'conversion' AND $__dateFilter(day) ORDER BY time",
+          "format": 0,
+          "queryType": "timeseries"
+        }
+      ],
+      "options": {},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "showPoints": "always"
+          }
+        },
+        "overrides": []
+      }
+    }
+  ]
+}

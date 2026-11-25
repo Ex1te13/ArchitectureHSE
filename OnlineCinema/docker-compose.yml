@@ -1,0 +1,255 @@
+x-kafka-env: &kafka-env
+  CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+  KAFKA_PROCESS_ROLES: broker,controller
+  KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093,2@kafka-2:29093,3@kafka-3:29093
+  KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+  KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+  KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 2
+  KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 2
+  KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+  KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+  KAFKA_LOG_DIRS: /var/lib/kafka/data
+
+services:
+  kafka:
+    image: confluentinc/cp-kafka:7.9.11
+    hostname: kafka
+    ports:
+      - "127.0.0.1:9092:9092"
+    environment:
+      <<: *kafka-env
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092,CONTROLLER://kafka:29093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck: &broker-health
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:29092"]
+      interval: 10s
+      timeout: 8s
+      retries: 12
+      start_period: 20s
+
+  kafka-2:
+    image: confluentinc/cp-kafka:7.9.11
+    hostname: kafka-2
+    ports:
+      - "127.0.0.1:9093:9092"
+    environment:
+      <<: *kafka-env
+      KAFKA_NODE_ID: 2
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092,CONTROLLER://kafka-2:29093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-2:29092,EXTERNAL://localhost:9093
+    volumes:
+      - kafka-2-data:/var/lib/kafka/data
+    healthcheck: *broker-health
+
+  kafka-3:
+    image: confluentinc/cp-kafka:7.9.11
+    hostname: kafka-3
+    depends_on:
+      kafka-2:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:9094:9092"
+    environment:
+      <<: *kafka-env
+      KAFKA_NODE_ID: 3
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092,CONTROLLER://kafka-3:29093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-3:29092,EXTERNAL://localhost:9094
+    volumes:
+      - kafka-3-data:/var/lib/kafka/data
+    healthcheck: *broker-health
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.9.11
+    ports:
+      - "127.0.0.1:8081:8081"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka:29092,PLAINTEXT://kafka-2:29092,PLAINTEXT://kafka-3:29092
+      SCHEMA_REGISTRY_KAFKASTORE_TOPIC_REPLICATION_FACTOR: 2
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8081/subjects"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
+
+  kafka-init:
+    image: confluentinc/cp-kafka:7.9.11
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+    volumes:
+      - ./kafka/init.sh:/init.sh:ro
+    entrypoint: ["bash", "/init.sh"]
+
+  schema-init:
+    build:
+      context: .
+      target: schema-init
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      schema-registry:
+        condition: service_healthy
+    environment:
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+
+  producer:
+    build:
+      context: .
+      target: producer
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      schema-init:
+        condition: service_completed_successfully
+    environment:
+      KAFKA_BROKERS: kafka:29092,kafka-2:29092,kafka-3:29092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      GENERATE_EVENTS: ${GENERATE_EVENTS:-false}
+      GENERATOR_INTERVAL: ${GENERATOR_INTERVAL:-5s}
+
+    healthcheck:
+      test: ["CMD", "/healthcheck", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.8.45.6
+    ports:
+      - "127.0.0.1:8123:8123"
+    environment:
+      CLICKHOUSE_USER: cinema
+      CLICKHOUSE_PASSWORD: cinema
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--user", "cinema", "--password", "cinema", "--query", "SELECT 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  clickhouse-init:
+    image: clickhouse/clickhouse-server:26.8.45.6
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    volumes:
+      - ./clickhouse:/migrations:ro
+    entrypoint: ["sh", "/migrations/init.sh"]
+
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: cinema
+      POSTGRES_USER: cinema
+      POSTGRES_PASSWORD: cinema
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "cinema", "-d", "cinema"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  aggregation:
+    build:
+      context: .
+      target: aggregation
+    ports:
+      - "127.0.0.1:8082:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse-init:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgres://cinema:cinema@postgres:5432/cinema?sslmode=disable
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: cinema
+      CLICKHOUSE_PASSWORD: cinema
+      S3_ENDPOINT: s3:8333
+      S3_ACCESS_KEY: cinema-local
+      S3_SECRET_KEY: cinema-local-secret
+      AGGREGATION_INTERVAL: ${AGGREGATION_INTERVAL:-5m}
+
+    healthcheck:
+      test: ["CMD", "/healthcheck", "http://localhost:8082/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  s3:
+    image: chrislusf/seaweedfs:4.55
+    command: ["mini", "-dir=/data"]
+    environment:
+      AWS_ACCESS_KEY_ID: cinema-local
+      AWS_SECRET_ACCESS_KEY: cinema-local-secret
+    ports:
+      - "127.0.0.1:8333:8333"
+    volumes:
+      - s3-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:9333/cluster/status"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  grafana:
+    build: ./grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: cinema-local
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/cinema.json
+    depends_on:
+      clickhouse-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
+  pipeline-test:
+    profiles: ["test"]
+    build:
+      context: .
+      target: pipeline-test
+    depends_on:
+      producer:
+        condition: service_started
+      clickhouse-init:
+        condition: service_completed_successfully
+    environment:
+      PRODUCER_URL: http://producer:8080
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: cinema
+      CLICKHOUSE_PASSWORD: cinema
+
+volumes:
+  kafka-2-data:
+  kafka-3-data:
+  s3-data:
+  kafka-data:
+  clickhouse-data:
+  postgres-data:
